@@ -40,15 +40,17 @@ describe("authenticate", function () {
       fail();
     } catch (err) {
       expect(err instanceof UnauthorizedError).toBeTruthy();
+      expect(err.message).toContain("Invalid username/password");
     }
   });
 
   test("unauth if wrong password", async function () {
     try {
-      await User.authenticate("c1", "wrong");
+      await User.authenticate("u1", "wrong");
       fail();
     } catch (err) {
       expect(err instanceof UnauthorizedError).toBeTruthy();
+      expect(err.message).toContain("Invalid username/password");
     }
   });
 });
@@ -102,6 +104,7 @@ describe("register", function () {
       fail();
     } catch (err) {
       expect(err instanceof BadRequestError).toBeTruthy();
+      expect(err.message).toContain("Duplicate username");
     }
   });
 });
@@ -141,7 +144,15 @@ describe("get", function () {
       lastName: "U1L",
       email: "u1@email.com",
       isAdmin: false,
-      applications: [testJobIds[0]],
+      applications: [
+        {
+          id: testJobIds[0],
+          title: "Job1",
+          companyHandle: "c1",
+          companyName: "C1",
+          status: "applied"
+        }
+      ],
     });
   });
 
@@ -151,6 +162,7 @@ describe("get", function () {
       fail();
     } catch (err) {
       expect(err instanceof NotFoundError).toBeTruthy();
+      expect(err.message).toContain("No user found");
     }
   });
 });
@@ -160,24 +172,24 @@ describe("get", function () {
 describe("update", function () {
   const updateData = {
     firstName: "NewF",
-    lastName: "NewF",
+    lastName: "NewL",
     email: "new@email.com",
     isAdmin: true,
   };
 
   test("works", async function () {
-    let job = await User.update("u1", updateData);
-    expect(job).toEqual({
+    let user = await User.update("u1", updateData);
+    expect(user).toEqual({
       username: "u1",
       ...updateData,
     });
   });
 
   test("works: set password", async function () {
-    let job = await User.update("u1", {
+    let user = await User.update("u1", {
       password: "new",
     });
-    expect(job).toEqual({
+    expect(user).toEqual({
       username: "u1",
       firstName: "U1F",
       lastName: "U1L",
@@ -189,6 +201,16 @@ describe("update", function () {
     expect(found.rows[0].password.startsWith("$2b$")).toEqual(true);
   });
 
+  test("unauth for non-admins updating admin", async function () {
+    try {
+      await User.update("u1", { isAdmin: true });
+      fail();
+    } catch (err) {
+      expect(err instanceof UnauthorizedError).toBeTruthy();
+      expect(err.message).toContain("Cannot change admin status");
+    }
+  });
+
   test("not found if no such user", async function () {
     try {
       await User.update("nope", {
@@ -197,13 +219,14 @@ describe("update", function () {
       fail();
     } catch (err) {
       expect(err instanceof NotFoundError).toBeTruthy();
+      expect(err.message).toContain("No user found");
     }
   });
 
   test("bad request if no data", async function () {
     expect.assertions(1);
     try {
-      await User.update("c1", {});
+      await User.update("u1", {});
       fail();
     } catch (err) {
       expect(err instanceof BadRequestError).toBeTruthy();
@@ -217,7 +240,7 @@ describe("remove", function () {
   test("works", async function () {
     await User.remove("u1");
     const res = await db.query(
-        "SELECT * FROM users WHERE username='u1'");
+      "SELECT * FROM users WHERE username='u1'");
     expect(res.rows.length).toEqual(0);
   });
 
@@ -227,6 +250,7 @@ describe("remove", function () {
       fail();
     } catch (err) {
       expect(err instanceof NotFoundError).toBeTruthy();
+      expect(err.message).toContain("No user found");
     }
   });
 });
@@ -236,30 +260,54 @@ describe("remove", function () {
 describe("applyToJob", function () {
   test("works", async function () {
     await User.applyToJob("u1", testJobIds[1]);
-
     const res = await db.query(
-        "SELECT * FROM applications WHERE job_id=$1", [testJobIds[1]]);
+      "SELECT * FROM applications WHERE job_id=$1", [testJobIds[1]]);
     expect(res.rows).toEqual([{
       job_id: testJobIds[1],
       username: "u1",
+      status: "applied"
     }]);
+  });
+
+  test("works with custom status", async function () {
+    await User.applyToJob("u1", testJobIds[1], "interviewed");
+    const res = await db.query(
+      "SELECT * FROM applications WHERE job_id=$1", [testJobIds[1]]);
+    expect(res.rows).toEqual([{
+      job_id: testJobIds[1],
+      username: "u1",
+      status: "interviewed"
+    }]);
+  });
+
+  test("bad request with duplicate application", async function () {
+    try {
+      await User.applyToJob("u1", testJobIds[0]);
+      await User.applyToJob("u1", testJobIds[0]);
+      fail();
+    } catch (err) {
+      expect(err instanceof BadRequestError).toBeTruthy();
+      expect(err.message).toContain("Already applied");
+    }
   });
 
   test("not found if no such job", async function () {
     try {
-      await User.applyToJob("u1", 0, "applied");
+      await User.applyToJob("u1", 0);
       fail();
     } catch (err) {
       expect(err instanceof NotFoundError).toBeTruthy();
+      expect(err.message).toContain("No job");
     }
   });
 
   test("not found if no such user", async function () {
     try {
-      await User.applyToJob("nope", testJobIds[0], "applied");
+      await User.applyToJob("nope", testJobIds[0]);
       fail();
     } catch (err) {
       expect(err instanceof NotFoundError).toBeTruthy();
+      expect(err.message).toContain("No username");
     }
   });
 });
