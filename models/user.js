@@ -139,12 +139,28 @@ class User {
 
     if (!user) throw new NotFoundError(`No user: ${username}`);
 
-    const userApplicationsRes = await db.query(
+    /**const userApplicationsRes = await db.query(
           `SELECT a.job_id
            FROM applications AS a
            WHERE a.username = $1`, [username]);
+  */
 
-    user.applications = userApplicationsRes.rows.map(a => a.job_id);
+    const userApplicationsRes = await db.query(
+    `SELECT a.job_id, j.title, j.company_handle AS "companyHandle", c.name AS "companyName", a.status
+     FROM applications AS a
+     LEFT JOIN jobs AS j ON a.job_id = j.id
+     LEFT JOIN companies AS c ON j.company_handle = c.handle
+     WHERE a.username = $1`, [username]);
+
+    // Current (incorrect) user.applications = userApplicationsRes.rows.map(a => a.job_id);
+
+    user.applications = userApplicationsRes.rows.map(a => ({
+    id: a.job_id,
+    title: a.title,
+    companyHandle: a.company_handle,
+    companyName: a.company_name,
+    status: a.status 
+    
     return user;
   }
 
@@ -218,7 +234,18 @@ class User {
    **/
 
   static async applyToJob(username, jobId) {
-    const preCheck = await db.query(
+ // Add duplicate check
+     const existingApp = await db.query(
+      `SELECT job_id FROM applications 
+       WHERE username = $1 AND job_id = $2`,
+      [username, jobId]
+    );
+  
+    if (existingApp.rows[0]) {
+      throw new BadRequestError(`Already applied to job ${jobId}`);
+    }
+
+ const preCheck = await db.query(
           `SELECT id
            FROM jobs
            WHERE id = $1`, [jobId]);
